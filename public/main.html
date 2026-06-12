@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Galaxias de Catamarca</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:100%; height:100%; overflow:hidden; background:#000; }
+canvas { display:block; position:absolute; top:0; left:0; width:100%; height:100%; }
+
+/* Flash de warp */
+#flash {
+  position:fixed; inset:0; pointer-events:none; z-index:20; opacity:0;
+  background: radial-gradient(ellipse at var(--fx,50%) var(--fy,50%),
+    rgba(180,230,255,0.9) 0%, rgba(80,140,255,0.35) 40%, transparent 70%);
+}
+
+/* Nombre del destino al llegar */
+#destination {
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  text-align:center; pointer-events:none; z-index:25; opacity:0;
+  transition: opacity 0.5s ease;
+  font-family:'Georgia',serif;
+}
+#destination .dest-name {
+  font-size: clamp(28px, 5vw, 64px);
+  letter-spacing: 0.18em;
+  color: rgba(200,230,255,0.95);
+  text-shadow: 0 0 40px rgba(100,180,255,0.8), 0 0 80px rgba(60,120,255,0.4);
+  text-transform: uppercase;
+  display:block;
+}
+#destination .dest-sub {
+  font-size: clamp(12px, 1.5vw, 18px);
+  letter-spacing: 0.35em;
+  color: rgba(140,190,255,0.65);
+  text-transform: uppercase;
+  margin-top: 10px;
+  display:block;
+}
+#destination .dest-user {
+  font-size: clamp(10px, 1.2vw, 14px);
+  letter-spacing: 0.28em;
+  color: rgba(120,170,255,0.45);
+  margin-top: 6px;
+  display:block;
+}
+
+/* QR esquina */
+#qr-wrap {
+  position:fixed; bottom:24px; right:24px; z-index:30;
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  transition: opacity 0.5s;
+}
+#qr-wrap canvas { border:1px solid rgba(100,160,255,0.3); border-radius:4px; }
+#qr-label {
+  font-family:'Georgia',serif;
+  font-size:10px; letter-spacing:0.2em;
+  color:rgba(140,190,255,0.5); text-transform:uppercase;
+  text-align:center;
+}
+
+/* Hint inicial */
+#hint {
+  position:fixed; bottom:36px; left:50%; transform:translateX(-50%);
+  font-family:'Georgia',serif;
+  font-size:clamp(11px,1.5vw,15px); letter-spacing:0.32em;
+  color:rgba(160,210,255,0.4); text-transform:uppercase;
+  pointer-events:none; user-select:none; text-align:center;
+  transition: opacity 1s ease;
+}
+
+/* Usuarios activos */
+#users-strip {
+  position:fixed; top:18px; left:50%; transform:translateX(-50%);
+  display:flex; gap:8px; flex-wrap:wrap; justify-content:center;
+  z-index:28; pointer-events:none; max-width:80vw;
+}
+.user-badge {
+  font-family:'Georgia',serif;
+  font-size:11px; letter-spacing:0.18em;
+  color:rgba(160,210,255,0.55);
+  background:rgba(10,30,80,0.3);
+  border:1px solid rgba(60,120,220,0.25);
+  padding:3px 10px; border-radius:20px;
+  animation: fadeInBadge 0.6s ease both;
+}
+@keyframes fadeInBadge { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="flash"></div>
+<div id="destination">
+  <span class="dest-name" id="dest-name"></span>
+  <span class="dest-sub"  id="dest-sub"></span>
+  <span class="dest-user" id="dest-user"></span>
+</div>
+<div id="qr-wrap">
+  <canvas id="qr-canvas" width="96" height="96"></canvas>
+  <div id="qr-label">Viajá desde tu cel</div>
+</div>
+<div id="hint">✦ Esperando viajeros · escaneá el QR ✦</div>
+<div id="users-strip" id="users-strip"></div>
+
+<!-- QRCode.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<!-- Socket.io -->
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// GALAXIAS DE CATAMARCA — pantalla principal
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── Ciudades / destinos de Catamarca ───────────────────────────────────────
+const DESTINATIONS = [
+  { name: 'San Fernando del Valle', sub: 'Capital · 457 km sobre el mar', type: 'galaxy' },
+  { name: 'Andalgalá',              sub: 'Nebulosa del Cobre',            type: 'nebula'  },
+  { name: 'Belén',                  sub: 'Cuna de la Artesanía',          type: 'planet'  },
+  { name: 'Santa María',            sub: 'Puerta de los Valles',          type: 'planet'  },
+  { name: 'Tinogasta',              sub: 'Oasis de los Vientos',          type: 'nebula'  },
+  { name: 'Fiambalá',               sub: 'Dunas bajo las Estrellas',      type: 'galaxy'  },
+  { name: 'Antofagasta de la Sierra',sub:'Puna Sagrada',                  type: 'nebula'  },
+  { name: 'Londres',                sub: 'La Ciudad Más Antigua',         type: 'planet'  },
+  { name: 'Hualfín',                sub: 'Valle de los Diaguitas',        type: 'planet'  },
+  { name: 'El Peñón',               sub: 'Laguna Blanca',                 type: 'nebula'  },
+  { name: 'Poman',                  sub: 'Quebrada de los Sauces',        type: 'planet'  },
+  { name: 'Paclín',                 sub: 'El Valle Escondido',            type: 'galaxy'  },
+  { name: 'Aconquija',              sub: 'Cerro Centinela',               type: 'planet'  },
+  { name: 'Recreo',                 sub: 'Portal del Norte',              type: 'galaxy'  },
+  { name: 'La Merced',              sub: 'Río del Valle',                 type: 'planet'  },
+];
+
+// ─── Config por defecto ─────────────────────────────────────────────────────
+let CFG = {
+  speed: 1.0, warpIntensity: 1.0, starCount: 700,
+  theme: { bgColor:'#000008', nebulaHue:220, starColor:'blue', ringColor:'cyan' },
+  showQR: true, paused: false
+};
+
+// ─── Canvas ─────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const flash  = document.getElementById('flash');
+const hint   = document.getElementById('hint');
+let W,H,CX,CY;
+function resize() {
+  W=canvas.width=window.innerWidth; H=canvas.height=window.innerHeight;
+  CX=W/2; CY=H/2;
+  rebuildNebula();
+}
+window.addEventListener('resize', resize);
+
+// ─── QR ─────────────────────────────────────────────────────────────────────
+function buildQR() {
+  const url = window.location.origin + '/usuario.html';
+  document.getElementById('qr-canvas').replaceWith(document.createElement('canvas'));
+  const qc = document.getElementById('qr-wrap').querySelector('canvas') || (() => {
+    const c=document.createElement('canvas'); c.id='qr-canvas'; return c;
+  })();
+  new QRCode(document.getElementById('qr-canvas'), {
+    text: url, width:96, height:96,
+    colorDark:'#aaddff', colorLight:'#000010',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+}
+
+// ─── Socket ─────────────────────────────────────────────────────────────────
+const socket = io({ query: { role:'main' } });
+
+socket.on('config_update', cfg => {
+  CFG = cfg;
+  document.getElementById('qr-wrap').style.opacity = cfg.showQR ? '1' : '0';
+});
+
+socket.on('warp', data => {
+  if (CFG.paused) return;
+  triggerWarp(data.nx, data.ny, data.instagram);
+});
+
+socket.on('reset_scene', () => {
+  warpPhase = 0; speed = BASE_SPEED;
+  flyDX=flyDY=targetDX=targetDY=0;
+  warpRings.length=0;
+});
+
+socket.on('user_joined', data => addUserBadge(data.instagram));
+socket.on('user_left',   data => removeUserBadge(data.instagram));
+
+// ─── Usuarios strip ─────────────────────────────────────────────────────────
+const strip = document.getElementById('users-strip');
+const activeBadges = {};
+function addUserBadge(ig) {
+  if (activeBadges[ig]) return;
+  const d = document.createElement('div');
+  d.className='user-badge'; d.textContent='@'+ig; d.id='badge-'+ig;
+  strip.appendChild(d);
+  activeBadges[ig]=d;
+  hint.style.opacity='0';
+}
+function removeUserBadge(ig) {
+  if (activeBadges[ig]) { activeBadges[ig].remove(); delete activeBadges[ig]; }
+}
+
+// ─── Estrellas ───────────────────────────────────────────────────────────────
+const DEPTH=1600, FOV=500;
+const BASE_SPEED = 0.8;
+let speed=BASE_SPEED, warpPhase=0, warpTimer=0;
+let flyDX=0,flyDY=0,targetDX=0,targetDY=0;
+let warpOriginX=CX||0, warpOriginY=CY||0;
+
+class Star {
+  constructor(recycled=false){ this.reset(recycled); }
+  reset(recycled=false){
+    this.x=(Math.random()-0.5)*W*2.4;
+    this.y=(Math.random()-0.5)*H*2.4;
+    this.z=recycled?DEPTH:Math.random()*DEPTH;
+    const r=Math.random();
+    if(r<0.70) this.hue=null;
+    else if(r<0.90) this.hue=195+Math.random()*35;
+    else if(r<0.97) this.hue=250+Math.random()*20;
+    else this.hue=48;
+    this.baseSize=0.4+Math.random()*1.5;
+    this.bright=0.5+Math.random()*0.5;
+  }
+  project(){
+    const scale=FOV/Math.max(this.z,1);
+    return {
+      sx: CX+flyDX+this.x*scale,
+      sy: CY+flyDY+this.y*scale,
+      sz: this.baseSize*scale*1.8,
+      alpha: Math.min(1,(1-this.z/DEPTH)*1.4)*this.bright
+    };
+  }
+}
+let stars=[];
+function initStars(){ stars=Array.from({length:CFG.starCount||700},()=>new Star()); }
+
+// ─── Objetos visitables (planetas / nebulosas / galaxias) ────────────────────
+let spaceObjects=[];
+
+function initSpaceObjects(){
+  spaceObjects=[];
+  const count = 6 + Math.floor(Math.random()*4);
+  const used=new Set();
+  for(let i=0;i<count;i++){
+    let idx;
+    do { idx=Math.floor(Math.random()*DESTINATIONS.length); } while(used.has(idx));
+    used.add(idx);
+    const dest=DESTINATIONS[idx];
+    spaceObjects.push({
+      dest,
+      x: (Math.random()-0.5)*W*1.6,
+      y: (Math.random()-0.5)*H*1.6,
+      z: 400+Math.random()*900,
+      size: 18+Math.random()*28,
+      hue: dest.type==='galaxy'?220:(dest.type==='nebula'?250:180),
+      pulse: Math.random()*Math.PI*2,
+      rings: dest.type==='galaxy'?true:false,
+      visited:false
+    });
+  }
+}
+
+function drawSpaceObjects(dt){
+  for(const obj of spaceObjects){
+    obj.z -= speed;
+    obj.pulse += dt*1.2;
+    if(obj.z<=20){ obj.z=DEPTH; obj.visited=false; continue; }
+    const scale=FOV/Math.max(obj.z,1);
+    const sx=CX+flyDX+obj.x*scale;
+    const sy=CY+flyDY+obj.y*scale;
+    const sr=obj.size*scale;
+    if(sx<-sr||sx>W+sr||sy<-sr||sy>H+sr) continue;
+    const alpha=Math.min(0.9,(1-obj.z/DEPTH)*1.2)*(0.7+0.3*Math.sin(obj.pulse));
+    if(alpha<0.05) continue;
+
+    // Glow exterior
+    const glow=ctx.createRadialGradient(sx,sy,0,sx,sy,sr*3.5);
+    const h=obj.hue;
+    glow.addColorStop(0,`hsla(${h},80%,70%,${(alpha*0.25).toFixed(2)})`);
+    glow.addColorStop(1,`hsla(${h},70%,50%,0)`);
+    ctx.beginPath(); ctx.arc(sx,sy,sr*3.5,0,Math.PI*2);
+    ctx.fillStyle=glow; ctx.fill();
+
+    // Cuerpo
+    const body=ctx.createRadialGradient(sx-sr*0.2,sy-sr*0.2,0,sx,sy,sr);
+    if(obj.dest.type==='planet'){
+      body.addColorStop(0,`hsla(${h+20},60%,75%,${alpha.toFixed(2)})`);
+      body.addColorStop(0.6,`hsla(${h},55%,45%,${alpha.toFixed(2)})`);
+      body.addColorStop(1,`hsla(${h-20},50%,20%,${(alpha*0.8).toFixed(2)})`);
+    } else if(obj.dest.type==='nebula'){
+      body.addColorStop(0,`hsla(${h},70%,80%,${(alpha*0.6).toFixed(2)})`);
+      body.addColorStop(0.4,`hsla(${h+30},65%,55%,${(alpha*0.4).toFixed(2)})`);
+      body.addColorStop(1,`hsla(${h+60},50%,30%,0)`);
+    } else { // galaxy
+      body.addColorStop(0,`hsla(${h},75%,90%,${(alpha*0.9).toFixed(2)})`);
+      body.addColorStop(0.3,`hsla(${h+10},70%,60%,${(alpha*0.5).toFixed(2)})`);
+      body.addColorStop(1,`hsla(${h+20},60%,30%,0)`);
+    }
+    ctx.beginPath(); ctx.arc(sx,sy,sr*(obj.dest.type==='nebula'?2:1),0,Math.PI*2);
+    ctx.fillStyle=body; ctx.fill();
+
+    // Anillos para galaxias
+    if(obj.rings && sr>4){
+      ctx.save();
+      ctx.translate(sx,sy);
+      ctx.scale(1,0.3);
+      ctx.beginPath(); ctx.arc(0,0,sr*1.7,0,Math.PI*2);
+      ctx.strokeStyle=`hsla(${h},70%,75%,${(alpha*0.4).toFixed(2)})`;
+      ctx.lineWidth=sr*0.3; ctx.stroke();
+      ctx.restore();
+    }
+
+    // Nombre si está cerca (z < 350)
+    if(obj.z<350 && sr>5){
+      const nameAlpha=Math.min(1,(350-obj.z)/200)*alpha;
+      ctx.fillStyle=`rgba(200,225,255,${(nameAlpha*0.9).toFixed(2)})`;
+      ctx.font=`${Math.max(10,sr*1.1).toFixed(0)}px Georgia`;
+      ctx.textAlign='center';
+      ctx.fillText(obj.dest.name, sx, sy+sr*(obj.dest.type==='planet'?1.8:2.2)+8);
+    }
+
+    // Detectar llegada (objeto muy cerca → mostrar destino)
+    if(!obj.visited && obj.z<80 && obj.z>10){
+      obj.visited=true;
+      showDestination(obj.dest);
+      // Refrescar después
+      setTimeout(()=>{ obj.z=DEPTH; obj.visited=false; },6000);
+    }
+  }
+}
+
+// ─── Mostrar destino ─────────────────────────────────────────────────────────
+let destTimeout=null;
+function showDestination(dest){
+  document.getElementById('dest-name').textContent=dest.name;
+  document.getElementById('dest-sub').textContent=dest.sub;
+  const el=document.getElementById('destination');
+  el.style.opacity='1';
+  if(destTimeout) clearTimeout(destTimeout);
+  destTimeout=setTimeout(()=>{ el.style.opacity='0'; },3500);
+}
+function showDestinationUser(dest,ig){
+  document.getElementById('dest-name').textContent=dest.name;
+  document.getElementById('dest-sub').textContent=dest.sub;
+  document.getElementById('dest-user').textContent=`@${ig}`;
+  const el=document.getElementById('destination');
+  el.style.opacity='1';
+  if(destTimeout) clearTimeout(destTimeout);
+  destTimeout=setTimeout(()=>{
+    el.style.opacity='0';
+    document.getElementById('dest-user').textContent='';
+  },4000);
+}
+
+// ─── Cometas ─────────────────────────────────────────────────────────────────
+const comets=[]; let nextCometT=5+Math.random()*10, elapsed=0;
+function spawnComet(){
+  const fromTop=Math.random()>0.4;
+  const a=Math.PI/6+Math.random()*(Math.PI/7);
+  comets.push({
+    x:fromTop?Math.random()*W:-20, y:fromTop?-20:Math.random()*H*0.6,
+    vx:Math.cos(a)*(2.5+Math.random()*3), vy:Math.sin(a)*(2.5+Math.random()*3),
+    tailLen:80+Math.random()*130, width:1.2+Math.random()*1.4,
+    life:0, maxLife:1.8+Math.random()*1.5, color:'180,220,255'
+  });
+}
+function drawComets(dt){
+  for(let i=comets.length-1;i>=0;i--){
+    const c=comets[i]; c.x+=c.vx; c.y+=c.vy; c.life+=dt;
+    if(c.life>c.maxLife||c.x>W+100||c.y>H+100){comets.splice(i,1);continue;}
+    const fade=Math.min(1,c.life*5)*Math.max(0,1-c.life/c.maxLife*1.1);
+    const mag=Math.hypot(c.vx,c.vy);
+    const tx=-(c.vx/mag)*c.tailLen, ty=-(c.vy/mag)*c.tailLen;
+    const g=ctx.createLinearGradient(c.x,c.y,c.x+tx,c.y+ty);
+    g.addColorStop(0,`rgba(${c.color},${(fade*0.9).toFixed(2)})`);
+    g.addColorStop(0.4,`rgba(${c.color},${(fade*0.25).toFixed(2)})`);
+    g.addColorStop(1,`rgba(${c.color},0)`);
+    ctx.save();
+    ctx.strokeStyle=g; ctx.lineWidth=c.width*fade; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(c.x,c.y); ctx.lineTo(c.x+tx,c.y+ty); ctx.stroke();
+    const glow=ctx.createRadialGradient(c.x,c.y,0,c.x,c.y,c.width*4);
+    glow.addColorStop(0,`rgba(240,250,255,${(fade*0.9).toFixed(2)})`);
+    glow.addColorStop(1,`rgba(${c.color},0)`);
+    ctx.beginPath(); ctx.arc(c.x,c.y,c.width*4,0,Math.PI*2);
+    ctx.fillStyle=glow; ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ─── Nebulosa de fondo ───────────────────────────────────────────────────────
+let nebulaCanvas=null;
+function rebuildNebula(){
+  if(!W||!H) return;
+  nebulaCanvas=document.createElement('canvas');
+  nebulaCanvas.width=W; nebulaCanvas.height=H;
+  const nc=nebulaCanvas.getContext('2d');
+  const baseHue=CFG.theme?.nebulaHue||220;
+  const blobs=[
+    {x:0.18,y:0.28,r:0.32,h:baseHue,   s:70,l:20,a:0.11},
+    {x:0.78,y:0.65,r:0.27,h:baseHue+25,s:60,l:18,a:0.09},
+    {x:0.55,y:0.18,r:0.20,h:baseHue+50,s:50,l:22,a:0.07},
+    {x:0.33,y:0.78,r:0.24,h:baseHue-15,s:65,l:25,a:0.08},
+    {x:0.85,y:0.25,r:0.18,h:baseHue+10,s:55,l:30,a:0.06},
+  ];
+  for(const b of blobs){
+    const grd=nc.createRadialGradient(b.x*W,b.y*H,0,b.x*W,b.y*H,b.r*Math.min(W,H));
+    grd.addColorStop(0,`hsla(${b.h},${b.s}%,${b.l}%,${b.a})`);
+    grd.addColorStop(0.5,`hsla(${b.h},${b.s-10}%,${b.l-8}%,${b.a*0.4})`);
+    grd.addColorStop(1,`hsla(${b.h},${b.s}%,${b.l}%,0)`);
+    nc.fillStyle=grd; nc.fillRect(0,0,W,H);
+  }
+}
+
+// ─── Warp ────────────────────────────────────────────────────────────────────
+const warpRings=[];
+const WARP_ACCEL=0.55, WARP_HOLD=0.9, WARP_DECEL=0.65;
+let lastWarpIG='';
+
+function triggerWarp(nx,ny,ig=''){
+  if(warpPhase!==0) return;
+  warpPhase=1; warpTimer=0;
+  lastWarpIG=ig;
+  warpOriginX=nx*W; warpOriginY=ny*H;
+  targetDX=(nx-0.5)*W*0.18;
+  targetDY=(ny-0.5)*H*0.18;
+  flash.style.setProperty('--fx', (nx*100).toFixed(1)+'%');
+  flash.style.setProperty('--fy', (ny*100).toFixed(1)+'%');
+  flash.style.transition='none'; flash.style.opacity='0.75';
+  setTimeout(()=>{ flash.style.transition='opacity 0.6s ease'; flash.style.opacity='0'; },80);
+  hint.style.opacity='0';
+  // Spawn anillos iniciales
+  for(let i=0;i<8;i++)
+    warpRings.push({r:i*24,maxR:Math.max(W,H)*1.3,alpha:0.65-i*0.07,ox:nx*W,oy:ny*H});
+}
+
+function updateWarp(dt){
+  warpTimer+=dt;
+  const intensity=CFG.warpIntensity||1;
+  if(warpPhase===1){
+    const p=Math.min(1,warpTimer/WARP_ACCEL);
+    speed=(BASE_SPEED+p*p*100*intensity)*CFG.speed;
+    if(warpTimer>=WARP_ACCEL){ warpPhase=2; warpTimer=0; }
+  } else if(warpPhase===2){
+    speed=(BASE_SPEED+100*intensity)*CFG.speed;
+    if(warpTimer>=WARP_HOLD){
+      warpPhase=3; warpTimer=0;
+      flash.style.transition='none'; flash.style.opacity='0.4';
+      setTimeout(()=>{ flash.style.transition='opacity 0.9s ease'; flash.style.opacity='0'; },60);
+      // Elegir destino más cercano al punto de warp
+      const nearest=findNearestObject();
+      if(nearest) showDestinationUser(nearest.dest, lastWarpIG);
+    }
+  } else if(warpPhase===3){
+    const p=Math.max(0,1-warpTimer/WARP_DECEL);
+    speed=(BASE_SPEED+p*p*100*intensity)*CFG.speed;
+    targetDX*=(1-dt*2.5); targetDY*=(1-dt*2.5);
+    if(warpTimer>=WARP_DECEL){ warpPhase=0; warpTimer=0; speed=BASE_SPEED*CFG.speed; targetDX=0; targetDY=0; }
+  } else {
+    speed=BASE_SPEED*(CFG.speed||1);
+  }
+  flyDX+=(targetDX-flyDX)*dt*4;
+  flyDY+=(targetDY-flyDY)*dt*4;
+}
+
+function findNearestObject(){
+  let best=null,bestZ=9999;
+  for(const o of spaceObjects){
+    if(o.z<bestZ){ bestZ=o.z; best=o; }
+  }
+  return best;
+}
+
+function drawWarpTunnel(dt){
+  if(warpPhase===0&&warpRings.length===0) return;
+  const wf=warpPhase===2?1:(warpPhase===1?Math.min(1,warpTimer/WARP_ACCEL):Math.max(0,1-warpTimer/WARP_DECEL));
+  if((warpPhase===1||warpPhase===2)&&Math.random()<0.4+wf*0.35)
+    warpRings.push({r:0,maxR:Math.max(W,H)*1.3,alpha:0.5+Math.random()*0.25,ox:warpOriginX,oy:warpOriginY});
+  const ringHue = CFG.theme?.ringColor==='purple'?265:(CFG.theme?.ringColor==='orange'?30:(CFG.theme?.ringColor==='white'?200:195));
+  for(let i=warpRings.length-1;i>=0;i--){
+    const ring=warpRings[i];
+    ring.r+=(5+wf*22)*(ring.r/60+1)*dt*60;
+    if(ring.r>ring.maxR){warpRings.splice(i,1);continue;}
+    const t=ring.r/ring.maxR;
+    const a=ring.alpha*(1-t)*wf;
+    if(a<0.01){warpRings.splice(i,1);continue;}
+    const rx=ring.r, ry=ring.r*(0.5+0.5*(1-t));
+    const hue=ringHue+t*25;
+    ctx.beginPath();
+    ctx.ellipse(ring.ox,ring.oy,rx,ry,0,0,Math.PI*2);
+    ctx.strokeStyle=`hsla(${hue},85%,70%,${a.toFixed(3)})`;
+    ctx.lineWidth=Math.max(0.5,(1-t)*2.8*wf);
+    ctx.stroke();
+  }
+}
+
+function drawStars(dt){
+  const wf=warpPhase===2?1:(warpPhase===1?Math.min(1,warpTimer/WARP_ACCEL):Math.max(0,1-warpTimer/WARP_DECEL));
+  for(const s of stars){
+    s.z-=speed;
+    if(s.z<=1){s.reset(true);continue;}
+    const {sx,sy,sz,alpha}=s.project();
+    if(sx<-W*0.4||sx>W*1.4||sy<-H*0.4||sy>H*1.4){s.reset(true);continue;}
+    const a=Math.max(0,Math.min(1,alpha));
+    if(wf>0.05&&sz>0.3){
+      const pScale=FOV/Math.max(s.z+speed*(1+wf*16),1);
+      const px=CX+flyDX+s.x*pScale, py=CY+flyDY+s.y*pScale;
+      const g=ctx.createLinearGradient(px,py,sx,sy);
+      const col=s.hue!==null?`hsla(${s.hue},80%,80%,`:'rgba(200,225,255,';
+      g.addColorStop(0,col+'0)');
+      g.addColorStop(1,col+(a*Math.min(1,wf*1.4)).toFixed(2)+')');
+      ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(sx,sy);
+      ctx.strokeStyle=g; ctx.lineWidth=Math.max(0.4,sz*0.65); ctx.stroke();
+    }
+    if(sz>0.2){
+      const r=Math.max(0.3,Math.min(sz,5));
+      const grd=ctx.createRadialGradient(sx,sy,0,sx,sy,r*2.5);
+      const col=s.hue!==null?`hsla(${s.hue},70%,85%,`:'rgba(220,235,255,';
+      grd.addColorStop(0,col+Math.min(1,a*1.2).toFixed(2)+')');
+      grd.addColorStop(1,col+'0)');
+      ctx.beginPath(); ctx.arc(sx,sy,r*2.5,0,Math.PI*2);
+      ctx.fillStyle=grd; ctx.fill();
+    }
+  }
+}
+
+// ─── Render loop ─────────────────────────────────────────────────────────────
+let lastT=performance.now();
+function render(now){
+  requestAnimationFrame(render);
+  const dt=Math.min((now-lastT)/1000,0.05); lastT=now; elapsed+=dt;
+  const bg=CFG.theme?.bgColor||'#000008';
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  if(nebulaCanvas) ctx.drawImage(nebulaCanvas,0,0);
+  if(elapsed>=nextCometT&&warpPhase===0){spawnComet();nextCometT=elapsed+5+Math.random()*12;}
+  updateWarp(dt);
+  drawStars(dt);
+  drawWarpTunnel(dt);
+  drawSpaceObjects(dt);
+  drawComets(dt);
+  // Viñeta
+  const vig=ctx.createRadialGradient(CX,CY,H*0.28,CX,CY,H*0.88);
+  vig.addColorStop(0,'rgba(0,0,0,0)');
+  vig.addColorStop(1,'rgba(0,0,8,0.75)');
+  ctx.fillStyle=vig; ctx.fillRect(0,0,W,H);
+}
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+resize();
+initStars();
+initSpaceObjects();
+buildQR();
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

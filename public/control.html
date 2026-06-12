@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Control · Galaxias de Catamarca</title>
+<style>
+*{ margin:0; padding:0; box-sizing:border-box; }
+html,body{ background:#070b1a; color:#c8dcff; font-family:'Georgia',serif; min-height:100vh; }
+
+header {
+  background:rgba(10,20,60,0.9);
+  border-bottom:1px solid rgba(60,100,200,0.2);
+  padding:14px 24px; display:flex; align-items:center; justify-content:space-between;
+}
+header h1 { font-size:16px; letter-spacing:0.22em; color:rgba(180,220,255,0.8); text-transform:uppercase; }
+#conn-status { font-size:11px; letter-spacing:0.15em; color:rgba(100,180,100,0.6); }
+
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:20px; max-width:1000px; margin:0 auto; }
+@media(max-width:680px){ .grid{ grid-template-columns:1fr; } }
+
+.card {
+  background:rgba(10,20,55,0.5);
+  border:1px solid rgba(60,100,200,0.2);
+  border-radius:10px; padding:18px;
+}
+.card h2 { font-size:11px; letter-spacing:0.28em; color:rgba(140,180,255,0.5); text-transform:uppercase; margin-bottom:16px; }
+
+/* Sliders */
+.ctrl-row { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
+.ctrl-label { display:flex; justify-content:space-between; font-size:12px; letter-spacing:0.12em; color:rgba(160,200,255,0.65); }
+.ctrl-label span { color:rgba(120,170,255,0.45); font-size:11px; }
+input[type=range] {
+  width:100%; -webkit-appearance:none; height:3px;
+  background:rgba(60,100,200,0.3); border-radius:2px; outline:none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+  background:#4a8cff; cursor:pointer; border:2px solid rgba(80,140,255,0.5);
+}
+
+/* Toggles */
+.toggle-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; font-size:12px; letter-spacing:0.12em; color:rgba(160,200,255,0.65); }
+.toggle { position:relative; width:38px; height:20px; }
+.toggle input { opacity:0; width:0; height:0; }
+.slider-tog {
+  position:absolute; inset:0; border-radius:20px;
+  background:rgba(30,50,100,0.6); border:1px solid rgba(60,100,200,0.3);
+  cursor:pointer; transition:.25s;
+}
+.slider-tog:before {
+  content:''; position:absolute; width:14px; height:14px; border-radius:50%;
+  background:#3a5fa0; top:2px; left:2px; transition:.25s;
+}
+input:checked+.slider-tog { background:rgba(30,80,200,0.5); border-color:rgba(80,140,255,0.5); }
+input:checked+.slider-tog:before { transform:translateX(18px); background:#4a8cff; }
+
+/* Color picker */
+.color-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+.color-opt {
+  width:28px; height:28px; border-radius:50%; cursor:pointer;
+  border:2px solid transparent; transition:border-color 0.2s, transform 0.15s;
+}
+.color-opt.active, .color-opt:hover { border-color:rgba(180,220,255,0.7); transform:scale(1.1); }
+
+.select-row { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
+.select-row label { font-size:12px; letter-spacing:0.12em; color:rgba(160,200,255,0.65); }
+.select-row select {
+  background:rgba(10,20,55,0.7); border:1px solid rgba(60,100,200,0.3);
+  color:rgba(180,220,255,0.8); padding:7px 10px; border-radius:6px;
+  font-size:12px; font-family:'Georgia',serif; outline:none;
+}
+
+/* Botones */
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  padding:9px 18px; border-radius:8px; font-family:'Georgia',serif;
+  font-size:12px; letter-spacing:0.15em; cursor:pointer;
+  border:1px solid rgba(60,100,200,0.35); text-transform:uppercase;
+  transition:all 0.2s; margin-right:6px; margin-bottom:6px; }
+.btn-blue  { background:rgba(15,40,120,0.5); color:rgba(160,210,255,0.85); }
+.btn-blue:hover { background:rgba(25,60,180,0.6); border-color:rgba(100,160,255,0.5); }
+.btn-red   { background:rgba(80,15,15,0.4); color:rgba(255,150,150,0.8); border-color:rgba(180,60,60,0.3); }
+.btn-red:hover { background:rgba(120,20,20,0.5); }
+.btn-green { background:rgba(10,80,30,0.4); color:rgba(100,255,140,0.8); border-color:rgba(40,180,80,0.3); }
+.btn-green:hover { background:rgba(15,110,40,0.5); }
+
+/* Tabla usuarios */
+#users-table-wrap { max-height:260px; overflow-y:auto; }
+table { width:100%; border-collapse:collapse; font-size:12px; }
+th { text-align:left; padding:6px 8px; color:rgba(120,170,255,0.45); letter-spacing:0.15em; font-size:10px; text-transform:uppercase; border-bottom:1px solid rgba(60,100,200,0.15); }
+td { padding:7px 8px; border-bottom:1px solid rgba(60,100,200,0.08); color:rgba(180,210,255,0.7); }
+tr:last-child td { border-bottom:none; }
+.badge-count { background:rgba(30,60,150,0.4); color:rgba(140,190,255,0.7); padding:1px 7px; border-radius:10px; font-size:10px; }
+
+/* Warp log */
+#warp-log { max-height:130px; overflow-y:auto; font-size:11px; }
+.log-entry { padding:4px 0; border-bottom:1px solid rgba(60,100,200,0.08); color:rgba(140,180,255,0.5); letter-spacing:0.08em; }
+.log-entry .log-ig { color:rgba(180,220,255,0.75); }
+.log-entry .log-time { color:rgba(100,140,200,0.35); font-size:10px; float:right; }
+
+/* Stats */
+.stat-row { display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
+.stat { text-align:center; flex:1; min-width:60px; }
+.stat .val { font-size:26px; color:rgba(180,220,255,0.85); }
+.stat .lbl { font-size:10px; letter-spacing:0.2em; color:rgba(100,140,200,0.4); text-transform:uppercase; margin-top:2px; }
+
+/* Force warp pad */
+#force-pad {
+  width:100%; aspect-ratio:16/7; background:rgba(5,10,30,0.7);
+  border:1px solid rgba(60,100,200,0.2); border-radius:8px;
+  cursor:crosshair; position:relative; overflow:hidden; margin-bottom:10px;
+}
+#force-pad canvas { display:block; width:100%; height:100%; }
+</style>
+</head>
+<body>
+<header>
+  <h1>✦ Control · Galaxias de Catamarca</h1>
+  <div id="conn-status">● Conectando…</div>
+</header>
+
+<div class="grid">
+
+  <!-- Panel: Config de velocidad -->
+  <div class="card">
+    <h2>Velocidad y efectos</h2>
+
+    <div class="ctrl-row">
+      <div class="ctrl-label">Velocidad base <span id="val-speed">1.0×</span></div>
+      <input type="range" id="sl-speed" min="0.2" max="3.0" step="0.1" value="1.0">
+    </div>
+    <div class="ctrl-row">
+      <div class="ctrl-label">Intensidad warp <span id="val-warp">1.0×</span></div>
+      <input type="range" id="sl-warp" min="0.3" max="2.5" step="0.1" value="1.0">
+    </div>
+    <div class="ctrl-row">
+      <div class="ctrl-label">Cantidad de estrellas <span id="val-stars">700</span></div>
+      <input type="range" id="sl-stars" min="200" max="1400" step="50" value="700">
+    </div>
+
+    <div class="toggle-row">
+      Pausar escena
+      <label class="toggle"><input type="checkbox" id="tog-pause"><span class="slider-tog"></span></label>
+    </div>
+    <div class="toggle-row">
+      Mostrar QR
+      <label class="toggle"><input type="checkbox" id="tog-qr" checked><span class="slider-tog"></span></label>
+    </div>
+
+    <button class="btn btn-blue" id="btn-apply">✦ Aplicar cambios</button>
+    <button class="btn btn-blue" id="btn-reset-scene">↺ Reset escena</button>
+  </div>
+
+  <!-- Panel: Colores -->
+  <div class="card">
+    <h2>Tema visual</h2>
+
+    <div class="select-row">
+      <label>Color de fondo</label>
+      <div class="color-row" id="bg-colors">
+        <div class="color-opt active" data-bg="#000008" style="background:#000010" title="Negro espacio"></div>
+        <div class="color-opt" data-bg="#050010" style="background:#0a0020" title="Violeta oscuro"></div>
+        <div class="color-opt" data-bg="#000a00" style="background:#001500" title="Verde oscuro"></div>
+        <div class="color-opt" data-bg="#0a0500" style="background:#150800" title="Rojo oscuro"></div>
+        <div class="color-opt" data-bg="#000510" style="background:#000820" title="Azul marino"></div>
+      </div>
+    </div>
+
+    <div class="select-row">
+      <label>Tono nebulosa</label>
+      <select id="sel-nebula">
+        <option value="220">Azul (default)</option>
+        <option value="260">Violeta</option>
+        <option value="180">Cian</option>
+        <option value="140">Verde</option>
+        <option value="30">Naranja</option>
+      </select>
+    </div>
+
+    <div class="select-row">
+      <label>Color de anillos warp</label>
+      <select id="sel-ring">
+        <option value="cyan">Cian</option>
+        <option value="purple">Púrpura</option>
+        <option value="orange">Naranja</option>
+        <option value="white">Blanco</option>
+      </select>
+    </div>
+
+    <button class="btn btn-blue" id="btn-apply-theme">✦ Aplicar tema</button>
+  </div>
+
+  <!-- Panel: Forzar warp -->
+  <div class="card">
+    <h2>Disparar Warp manual</h2>
+    <div id="force-pad"><canvas id="force-canvas"></canvas></div>
+    <p style="font-size:10px;letter-spacing:0.15em;color:rgba(100,140,200,0.4);text-align:center;">
+      Clic en el pad para forzar warp desde ese punto
+    </p>
+  </div>
+
+  <!-- Panel: Usuarios -->
+  <div class="card">
+    <h2>Viajeros conectados</h2>
+    <div class="stat-row">
+      <div class="stat"><div class="val" id="stat-users">0</div><div class="lbl">Usuarios</div></div>
+      <div class="stat"><div class="val" id="stat-warps">0</div><div class="lbl">Warps</div></div>
+    </div>
+    <div id="users-table-wrap">
+      <table>
+        <thead><tr><th>Instagram</th><th>Ingresó</th><th>Warps</th></tr></thead>
+        <tbody id="users-tbody"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px;">
+      <a href="/api/users/csv" class="btn btn-green" download>↓ Exportar CSV</a>
+      <button class="btn btn-red" id="btn-clear-users">✕ Limpiar lista</button>
+    </div>
+  </div>
+
+  <!-- Panel: Log de warps -->
+  <div class="card" style="grid-column:1/-1;">
+    <h2>Actividad reciente</h2>
+    <div id="warp-log"></div>
+  </div>
+
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket=io({ query:{role:'control'} });
+
+// ─── Estado ─────────────────────────────────────────────────────────────────
+let cfg={};
+let users=[];
+let totalWarps=0;
+
+socket.on('connect',    ()=>{ document.getElementById('conn-status').textContent='● Conectado'; document.getElementById('conn-status').style.color='rgba(100,255,140,0.7)'; });
+socket.on('disconnect', ()=>{ document.getElementById('conn-status').textContent='● Sin conexión'; document.getElementById('conn-status').style.color='rgba(255,100,100,0.6)'; });
+
+socket.on('config_update', c=>{
+  cfg=c;
+  document.getElementById('sl-speed').value=c.speed||1;
+  document.getElementById('val-speed').textContent=(c.speed||1).toFixed(1)+'×';
+  document.getElementById('sl-warp').value=c.warpIntensity||1;
+  document.getElementById('val-warp').textContent=(c.warpIntensity||1).toFixed(1)+'×';
+  document.getElementById('sl-stars').value=c.starCount||700;
+  document.getElementById('val-stars').textContent=c.starCount||700;
+  document.getElementById('tog-pause').checked=!!c.paused;
+  document.getElementById('tog-qr').checked=c.showQR!==false;
+  if(c.theme){
+    document.getElementById('sel-nebula').value=c.theme.nebulaHue||220;
+    document.getElementById('sel-ring').value=c.theme.ringColor||'cyan';
+    document.querySelectorAll('.color-opt').forEach(el=>{ el.classList.toggle('active',el.dataset.bg===c.theme.bgColor); });
+  }
+});
+
+socket.on('users_update', list=>{
+  users=list;
+  renderUsers();
+});
+
+socket.on('warp_event', data=>{
+  totalWarps++;
+  document.getElementById('stat-warps').textContent=totalWarps;
+  addLogEntry(data);
+});
+
+// ─── Sliders ─────────────────────────────────────────────────────────────────
+document.getElementById('sl-speed').addEventListener('input',e=>{ document.getElementById('val-speed').textContent=parseFloat(e.target.value).toFixed(1)+'×'; });
+document.getElementById('sl-warp').addEventListener('input', e=>{ document.getElementById('val-warp').textContent=parseFloat(e.target.value).toFixed(1)+'×'; });
+document.getElementById('sl-stars').addEventListener('input',e=>{ document.getElementById('val-stars').textContent=e.target.value; });
+
+// ─── Aplicar config ──────────────────────────────────────────────────────────
+document.getElementById('btn-apply').addEventListener('click',()=>{
+  socket.emit('set_config',{
+    speed:      parseFloat(document.getElementById('sl-speed').value),
+    warpIntensity:parseFloat(document.getElementById('sl-warp').value),
+    starCount:  parseInt(document.getElementById('sl-stars').value),
+    paused:     document.getElementById('tog-pause').checked,
+    showQR:     document.getElementById('tog-qr').checked,
+  });
+});
+
+document.getElementById('btn-apply-theme').addEventListener('click',()=>{
+  const activeBg=document.querySelector('.color-opt.active');
+  socket.emit('set_config',{ theme:{
+    bgColor:    activeBg?activeBg.dataset.bg:'#000008',
+    nebulaHue:  parseInt(document.getElementById('sel-nebula').value),
+    ringColor:  document.getElementById('sel-ring').value,
+    starColor:  'blue',
+  }});
+});
+
+document.getElementById('btn-reset-scene').addEventListener('click',()=>socket.emit('reset_scene'));
+
+// ─── Selectores de color ─────────────────────────────────────────────────────
+document.querySelectorAll('.color-opt').forEach(el=>{
+  el.addEventListener('click',()=>{
+    document.querySelectorAll('.color-opt').forEach(x=>x.classList.remove('active'));
+    el.classList.add('active');
+  });
+});
+
+// ─── Usuarios ────────────────────────────────────────────────────────────────
+function renderUsers(){
+  const tbody=document.getElementById('users-tbody');
+  tbody.innerHTML='';
+  document.getElementById('stat-users').textContent=users.length;
+  for(const u of [...users].reverse()){
+    const d=new Date(u.joinedAt);
+    const time=d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    tbody.innerHTML+=`<tr>
+      <td>@${u.instagram}</td>
+      <td>${time}</td>
+      <td><span class="badge-count">${u.warps||0}</span></td>
+    </tr>`;
+  }
+}
+
+document.getElementById('btn-clear-users').addEventListener('click',()=>{
+  if(!confirm('¿Borrar todos los usuarios?')) return;
+  fetch('/api/users',{method:'DELETE'});
+});
+
+// ─── Warp log ────────────────────────────────────────────────────────────────
+const warpLog=document.getElementById('warp-log');
+function addLogEntry(data){
+  const t=new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const div=document.createElement('div');
+  div.className='log-entry';
+  div.innerHTML=`<span class="log-ig">@${data.instagram}</span> disparó warp → x:${(data.nx*100).toFixed(0)}% y:${(data.ny*100).toFixed(0)}% <span class="log-time">${t}</span>`;
+  warpLog.prepend(div);
+  if(warpLog.children.length>50) warpLog.lastChild.remove();
+}
+
+// ─── Force warp pad ──────────────────────────────────────────────────────────
+const fc=document.getElementById('force-canvas');
+const fctx=fc.getContext('2d');
+let fW,fH;
+function resizeForce(){
+  fW=fc.width=fc.offsetWidth; fH=fc.height=fc.offsetHeight;
+  drawForcePad();
+}
+function drawForcePad(){
+  fctx.fillStyle='#000010'; fctx.fillRect(0,0,fW,fH);
+  // Grid
+  fctx.strokeStyle='rgba(60,100,200,0.12)'; fctx.lineWidth=0.5;
+  for(let x=0;x<=fW;x+=fW/8){ fctx.beginPath(); fctx.moveTo(x,0); fctx.lineTo(x,fH); fctx.stroke(); }
+  for(let y=0;y<=fH;y+=fH/4){ fctx.beginPath(); fctx.moveTo(0,y); fctx.lineTo(fW,y); fctx.stroke(); }
+  // Estrellas decorativas
+  for(let i=0;i<60;i++){
+    const x=Math.sin(i*137.5)*0.5+0.5, y=Math.cos(i*97.3)*0.5+0.5;
+    fctx.beginPath(); fctx.arc(x*fW,y*fH,0.8,0,Math.PI*2);
+    fctx.fillStyle='rgba(180,220,255,0.3)'; fctx.fill();
+  }
+  // Cruz central
+  fctx.strokeStyle='rgba(100,160,255,0.15)'; fctx.lineWidth=0.8;
+  fctx.beginPath(); fctx.moveTo(fW/2,0); fctx.lineTo(fW/2,fH); fctx.stroke();
+  fctx.beginPath(); fctx.moveTo(0,fH/2); fctx.lineTo(fW,fH/2); fctx.stroke();
+  fctx.fillStyle='rgba(100,160,255,0.12)';
+  fctx.font='9px Georgia'; fctx.textAlign='center'; fctx.letterSpacing='0.15em';
+  fctx.fillText('clic para disparar warp',fW/2,fH-6);
+}
+fc.addEventListener('click',e=>{
+  const r=fc.getBoundingClientRect();
+  const nx=(e.clientX-r.left)/fW;
+  const ny=(e.clientY-r.top)/fH;
+  socket.emit('force_warp',{nx,ny});
+  // Ripple en el pad
+  fctx.beginPath(); fctx.arc((e.clientX-r.left),(e.clientY-r.top),20,0,Math.PI*2);
+  fctx.strokeStyle='rgba(120,200,255,0.6)'; fctx.lineWidth=1.5; fctx.stroke();
+  setTimeout(drawForcePad,300);
+});
+window.addEventListener('resize', resizeForce);
+setTimeout(resizeForce,100);
+</script>
+</body>
+</html>
