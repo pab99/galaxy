@@ -7,7 +7,7 @@
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 html,body { width:100%; height:100%; overflow:hidden; background:#000; }
-canvas { display:block; position:absolute; top:0; left:0; width:100%; height:100%; }
+#c { display:block; position:absolute; top:0; left:0; width:100%; height:100%; }
 
 /* Flash de warp */
 #flash {
@@ -53,7 +53,8 @@ canvas { display:block; position:absolute; top:0; left:0; width:100%; height:100
   display:flex; flex-direction:column; align-items:center; gap:6px;
   transition: opacity 0.5s;
 }
-#qr-wrap canvas { border:1px solid rgba(100,160,255,0.3); border-radius:4px; }
+#qr-wrap .qr-inner { border:1px solid rgba(100,160,255,0.3); border-radius:4px; overflow:hidden; line-height:0; }
+#qr-wrap .qr-inner img { display:block; }
 #qr-label {
   font-family:'Georgia',serif;
   font-size:10px; letter-spacing:0.2em;
@@ -98,11 +99,10 @@ canvas { display:block; position:absolute; top:0; left:0; width:100%; height:100
   <span class="dest-user" id="dest-user"></span>
 </div>
 <div id="qr-wrap">
-  <canvas id="qr-canvas" width="96" height="96"></canvas>
   <div id="qr-label">Viajá desde tu cel</div>
 </div>
 <div id="hint">✦ Esperando viajeros · escaneá el QR ✦</div>
-<div id="users-strip" id="users-strip"></div>
+<div id="users-strip"></div>
 
 <!-- QRCode.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -155,13 +155,16 @@ window.addEventListener('resize', resize);
 // ─── QR ─────────────────────────────────────────────────────────────────────
 function buildQR() {
   const url = window.location.origin + '/usuario.html';
-  document.getElementById('qr-canvas').replaceWith(document.createElement('canvas'));
-  const qc = document.getElementById('qr-wrap').querySelector('canvas') || (() => {
-    const c=document.createElement('canvas'); c.id='qr-canvas'; return c;
-  })();
-  new QRCode(document.getElementById('qr-canvas'), {
-    text: url, width:96, height:96,
-    colorDark:'#aaddff', colorLight:'#000010',
+  const container = document.getElementById('qr-wrap');
+  // Limpiar intentos previos (sin tocar el canvas original)
+  const old = container.querySelector('.qr-inner');
+  if (old) old.remove();
+  const inner = document.createElement('div');
+  inner.className = 'qr-inner';
+  container.insertBefore(inner, container.firstChild);
+  new QRCode(inner, {
+    text: url, width: 96, height: 96,
+    colorDark: '#aaddff', colorLight: '#000010',
     correctLevel: QRCode.CorrectLevel.M
   });
 }

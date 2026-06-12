@@ -1,62 +1,159 @@
-# Galaxias de Catamarca
-**Sistema interactivo multiusuario — Tecnoincas**
+const express    = require('express');
+const http       = require('http');
+const { Server } = require('socket.io');
+const fs         = require('fs');
+const path       = require('path');
 
-## Archivos
+const app    = express();
+const server = http.createServer(app);
+const io     = new Server(server, { cors: { origin: '*' } });
 
-| Archivo | Descripción |
-|---------|-------------|
-| `public/main.html` | Pantalla del proyector / pantalla grande |
-| `public/usuario.html` | App del celular (acceso por QR) |
-| `public/control.html` | Panel del operador |
-| `server.js` | Backend Node.js + Socket.io |
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 
----
+// --- Estado global ---
+const DATA_FILE = path.join(__dirname, 'data.json');
 
-## Instalación local
+function loadData() {
+  try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); }
+  catch { return { users: [], config: defaultConfig() }; }
+}
 
-```bash
-npm install
-npm start
-# → http://localhost:3000
-```
+function saveData() {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 2));
+}
 
----
+function defaultConfig() {
+  return {
+    speed:         1.0,
+    warpIntensity: 1.0,
+    starCount:     700,
+    theme: {
+      bgColor:   '#000008',
+      nebulaHue: 220,
+      starColor: 'blue',
+      ringColor: 'cyan'
+    },
+    showQR:  true,
+    paused:  false
+  };
+}
 
-## Deploy en Render.com
+const state = loadData();
+if (!state.config) state.config = defaultConfig();
+if (!state.users)  state.users  = [];
 
-1. Crear nuevo **Web Service** en [render.com](https://render.com)
-2. Conectar el repo de GitHub
-3. Configurar:
-   - **Build command:** `npm install`
-   - **Start command:** `npm start`
-   - **Environment:** Node
-4. Una vez deployado, la URL será algo como `https://galaxias-catamarca.onrender.com`
+// --- Rutas REST ---
+app.get('/api/config', (_, res) => res.json(state.config));
+app.get('/api/users',  (_, res) => res.json(state.users));
 
-### URLs del sistema
-- Proyector: `https://tu-app.onrender.com/main.html`
-- Visitantes: `https://tu-app.onrender.com/usuario.html`
-- Control: `https://tu-app.onrender.com/control.html`
+app.get('/api/users/csv', (_, res) => {
+  const lines = ['instagram,tiempo,warps'];
+  for (const u of state.users)
+    lines.push(`${u.instagram},${u.joinedAt},${u.warps || 0}`);
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="visitantes.csv"');
+  res.send(lines.join('\n'));
+});
 
-El QR en `main.html` se genera automáticamente apuntando a `/usuario.html`.
+app.post('/api/config', (req, res) => {
+  Object.assign(state.config, req.body);
+  saveData();
+  io.to('main').emit('config_update', state.config);
+  res.json({ ok: true });
+});
 
----
+app.delete('/api/users', (_, res) => {
+  state.users = [];
+  saveData();
+  io.to('control').emit('users_update', state.users);
+  res.json({ ok: true });
+});
 
-## Flujo de uso en un evento
+// --- Socket.io ---
+io.on('connection', (socket) => {
+  const role = socket.handshake.query.role || 'user';
+  socket.join(role);
 
-1. Abrir `main.html` en la PC conectada al proyector (fullscreen con F11)
-2. El QR aparece en la esquina inferior derecha
-3. Los visitantes escanean el QR con su celular
-4. Ingresan su Instagram y acceden al pad táctil
-5. Al tocar cualquier punto del pad, el proyector hace warp hacia ese punto
-6. Aparecen planetas y nebulosas con nombres de ciudades de Catamarca
-7. El operador puede ajustar velocidad, colores y ver la lista de visitantes en `control.html`
-8. Exportar CSV con los Instagrams desde el panel de control
+  if (role === 'main') {
+    socket.emit('config_update', state.config);
+    console.log('[main] pantalla conectada');
+  }
 
----
+  if (role === 'control') {
+    socket.emit('config_update', state.config);
+    socket.emit('users_update', state.users);
+    console.log('[control] panel conectado');
+  }
 
-## Variables de entorno opcionales
+  if (role === 'user') {
+    socket.on('user_join', (data) => {
+      const ig = (data.instagram || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9._]/g, '')
+        .slice(0, 30);
+      if (!ig) return;
 
-| Variable | Descripción |
-|----------|-------------|
-| `PORT` | Puerto del servidor (default: 3000) |
-| `RENDER_EXTERNAL_URL` | URL pública (Render lo setea automáticamente, se usa para keep-alive) |
+      let user = state.users.find(u => u.instagram === ig);
+      if (!user) {
+        user = { instagram: ig, joinedAt: new Date().toISOString(), warps: 0, socketId: socket.id };
+        state.users.push(user);
+      } else {
+        user.socketId = socket.id;
+      }
+      saveData();
+
+      socket.data.instagram = ig;
+      socket.emit('join_ok', { instagram: ig, config: state.config });
+      io.to('control').emit('users_update', state.users);
+      io.to('main').emit('user_joined', { instagram: ig });
+      console.log('[user] @' + ig + ' conectado');
+    });
+
+    // El usuario toca el pad -> warp
+    socket.on('warp', (data) => {
+      if (state.config.paused) return;
+      const ig = socket.data.instagram;
+      if (!ig) return;
+
+      const user = state.users.find(u => u.instagram === ig);
+      if (user) { user.warps = (user.warps || 0) + 1; saveData(); }
+
+      io.to('main').emit('warp', { nx: data.nx, ny: data.ny, instagram: ig });
+      io.to('control').emit('warp_event', { instagram: ig, nx: data.nx, ny: data.ny, ts: Date.now() });
+      socket.emit('warp_ack');
+    });
+
+    socket.on('disconnect', () => {
+      const ig = socket.data.instagram;
+      if (ig) io.to('main').emit('user_left', { instagram: ig });
+      console.log('[user] @' + (ig || '?') + ' desconectado');
+    });
+  }
+
+  // Control panel
+  socket.on('set_config', (cfg) => {
+    Object.assign(state.config, cfg);
+    saveData();
+    io.to('main').emit('config_update', state.config);
+    socket.emit('config_update', state.config);
+  });
+
+  socket.on('force_warp', (data) => {
+    io.to('main').emit('warp', { nx: data.nx || 0.5, ny: data.ny || 0.5, instagram: 'control' });
+  });
+
+  socket.on('reset_scene', () => {
+    io.to('main').emit('reset_scene');
+  });
+});
+
+// --- Keep-alive para Render.com (free tier) ---
+app.get('/ping', (_, res) => res.send('pong'));
+setInterval(() => {
+  const url = process.env.RENDER_EXTERNAL_URL;
+  if (url) require('https').get(url + '/ping', () => {}).on('error', () => {});
+}, 14 * 60 * 1000);
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log('Galaxias Warp en puerto ' + PORT));

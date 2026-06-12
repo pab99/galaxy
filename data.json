@@ -1,2 +1,1 @@
-node_modules/
-*.log
+{"users":[],"config":{"speed":1.0,"warpIntensity":1.0,"starCount":700,"theme":{"bgColor":"#000008","nebulaHue":220,"starColor":"blue","ringColor":"cyan"},"showQR":true,"paused":false}}
